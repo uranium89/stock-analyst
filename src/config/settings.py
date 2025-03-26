@@ -28,23 +28,13 @@ CHART_COLORS = {
 
 # Technical Analysis Parameters
 TECHNICAL_PARAMS = {
-    'MA_PERIODS': [5, 10, 20, 50, 200],  # Added 5 and 10 day MAs
+    'MA_PERIODS': [20, 50, 200],
     'RSI_PERIOD': 14,
     'MACD_FAST': 12,
     'MACD_SLOW': 26,
     'MACD_SIGNAL': 9,
     'BB_PERIOD': 20,
-    'BB_STD': 2,
-    'STOCH_K': 14,  # Stochastic Oscillator
-    'STOCH_D': 3,
-    'ATR_PERIOD': 14,  # Average True Range
-    'ADX_PERIOD': 14,  # Average Directional Index
-    'OBV_PERIOD': 20,  # On Balance Volume
-    'CCI_PERIOD': 20,  # Commodity Channel Index
-    'MFI_PERIOD': 14,  # Money Flow Index
-    'ROC_PERIOD': 12,  # Rate of Change
-    'MOM_PERIOD': 10,  # Momentum
-    'WILLR_PERIOD': 14  # Williams %R
+    'BB_STD': 2
 }
 
 # Scoring Weights
