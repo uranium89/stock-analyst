@@ -35,7 +35,18 @@ class FireantAPI:
         url = f"{FIREANT_BASE_URL}/{symbol}/profile"
         return self._make_request(url)
     
-    def get_historical_quotes(self, symbol: str, start_date: str, end_date: str) -> List[Dict[str, Any]]:
-        """Get historical price data for a symbol"""
-        url = f"{FIREANT_BASE_URL}/{symbol}/historical-quotes?startDate={start_date}&endDate={end_date}"
+    def get_historical_quotes(self, symbol: str, start_date: str, end_date: str, offset: int = 0, limit: int = 365) -> List[Dict[str, Any]]:
+        """Get historical price data for a symbol
+        
+        Args:
+            symbol: Stock symbol
+            start_date: Start date in MM/DD/YYYY format
+            end_date: End date in MM/DD/YYYY format
+            offset: Number of records to skip (default: 0)
+            limit: Maximum number of records to return (default: 365)
+            
+        Returns:
+            List of historical price data
+        """
+        url = f"{FIREANT_BASE_URL}/{symbol}/historical-quotes?startDate={start_date}&endDate={end_date}&offset={offset}&limit={limit}"
         return self._make_request(url) 
