@@ -1,0 +1,3 @@
+"""
+AI Trading Analysis package
+""" 
