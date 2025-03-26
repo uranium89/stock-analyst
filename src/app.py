@@ -13,7 +13,6 @@ from src.analyzers.portfolio_analyzer import PortfolioAnalyzer
 from src.analyzers.price_predictor import PricePredictor
 from src.charts.chart_creator import ChartCreator
 from src.utils.api_client import FireantAPI
-from src.utils.symbol_validator import SymbolValidator
 import logging
 from datetime import datetime, timedelta
 
@@ -38,7 +37,7 @@ def main():
         st.title("Menu")
         menu_option = st.radio(
             "Chọn chức năng",
-            ["Phân Tích Cổ Phiếu", "Phân Bổ Danh Mục", "Trợ Lý Đầu Tư"]
+            ["Phân Tích Cổ Phiếu", "Phân Bổ Danh Mục"]
         )
     
     if menu_option == "Phân Tích Cổ Phiếu":
@@ -49,40 +48,350 @@ def main():
         api_client = FireantAPI()
         chart_creator = ChartCreator()
         report_generator = ReportGenerator()
-        symbol_validator = SymbolValidator()
         
         # Get user input
         symbol = st.text_input("Nhập mã chứng khoán (VD: VNM, VCB, VHM):", "").upper()
         
         if symbol:
-            # Validate symbol using Gemini
-            validation_result = symbol_validator.validate_symbol(symbol)
-            
-            if not validation_result["is_valid"]:
-                st.error(f"Mã chứng khoán không hợp lệ: {validation_result['reason']}")
-                return
-                
-            st.success(f"Mã chứng khoán hợp lệ: {symbol} - {validation_result['company_name']} ({validation_result['exchange']})")
-            
-            # Continue with existing analysis code
             try:
-                with st.spinner("Đang phân tích..."):
+                with st.spinner("Đang phân tích dữ liệu..."):
                     # Initialize analyzers
-                    scorer = CompanyScorer(symbol, api_client)
-                    price_analyzer = PriceTrendAnalyzer(symbol, api_client)
-                    price_predictor = PricePredictor()
+                    scorer = CompanyScorer(symbol)
+                    price_analyzer = PriceTrendAnalyzer(symbol)
                     
                     # Get analysis results
                     financial_result = scorer.calculate_score()
-                    price_analysis = price_analyzer.analyze()
-                    price_prediction = price_predictor.train(price_analyzer.price_data, symbol)
+                    price_analysis = price_analyzer.analyze_trend()
+                    price_data = price_analyzer.price_data
                     
-                    # Generate reports
-                    financial_report = report_generator.generate_financial_report(scorer, financial_result)
-                    price_report = report_generator.generate_price_analysis_report(price_analysis, price_analyzer.price_data)
+                    # Update title with company name
+                    company_name = scorer.data['fundamental']['company_info']['Tên công ty']
+                    st.title(f"Phân Tích Điểm Số Tài Chính - {company_name} ({symbol})")
                     
-                    # Display results
-                    # ... rest of the existing display code ...
+                    st.markdown(f"**Loại Công Ty:** {'Ngân Hàng' if scorer.company_type == 'bank' else 'Công Ty Thường'}")
+                    
+                    # Display results in tabs
+                    tab1, tab2, tab3, tab4 = st.tabs(["Phân Tích Tài Chính", "Phân Tích Xu Hướng Giá", "Dự Đoán Giá AI", "Báo Cáo Chi Tiết"])
+                    
+                    with tab1:
+                        # Display key financial metrics
+                        st.subheader("Chỉ Số Tài Chính Chính")
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            st.metric(
+                                "P/E",
+                                f"{scorer.data['fundamental']['financial_metrics']['P/E']:.2f}",
+                                f"{scorer.data['fundamental']['financial_metrics']['P/E'] - 15:.2f}"
+                            )
+                            st.metric(
+                                "EPS",
+                                f"{scorer.data['fundamental']['financial_metrics']['EPS']:.2f}",
+                                f"{scorer.data['fundamental']['financial_metrics']['EPS'] - 1:.2f}"
+                            )
+                            st.metric(
+                                "Giá Hiện Tại",
+                                f"{scorer.data['fundamental']['company_info']['Giá hiện tại']:,.0f}",
+                                f"{scorer.data['fundamental']['company_info']['Giá hiện tại'] - 10000:,.0f}"
+                            )
+                        
+                        with col2:
+                            latest = scorer.data['latest']
+                            st.metric(
+                                "ROE",
+                                f"{latest.get('ROE', 0) * 100:.2f}%",
+                                f"{latest.get('ROE', 0) * 100 - 15:.2f}%"
+                            )
+                            st.metric(
+                                "ROA",
+                                f"{latest.get('NetProfitFromOperatingActivity', 0) / latest.get('TotalAsset', 1) * 100:.2f}%",
+                                f"{latest.get('NetProfitFromOperatingActivity', 0) / latest.get('TotalAsset', 1) * 100 - 5:.2f}%"
+                            )
+                            payback = scorer.payback_analysis
+                            st.metric(
+                                "Thời Gian Hoàn Vốn",
+                                f"{payback['payback_years']['moderate']:.1f} năm",
+                                f"{payback['payback_years']['moderate'] - 5:.1f} năm"
+                            )
+                            st.metric(
+                                "Cổ Tức Trung Bình",
+                                f"{payback['metrics']['avg_dividend']:,.0f}",
+                                f"{payback['metrics']['avg_dividend_growth']:.1%}"
+                            )
+                        
+                        with col3:
+                            latest = scorer.data['latest']
+                            st.metric(
+                                "Cổ Tức (%)",
+                                f"{latest.get('DividendYield', 0) * 100:.2f}%",
+                                f"{latest.get('DividendYield', 0) * 100 - 5:.2f}%"
+                            )
+                            st.metric(
+                                "Vốn Hóa",
+                                f"{scorer.data['fundamental']['company_info']['Vốn hóa']:,.0f}",
+                                f"{scorer.data['fundamental']['company_info']['Vốn hóa'] - 1000000000:,.0f}"
+                            )
+                            st.metric(
+                                "Mức Độ Ổn Định Cổ Tức",
+                                scorer.payback_analysis['dividend_stability'],
+                                f"{scorer.payback_analysis['metrics']['avg_coverage_ratio']:.2f}"
+                            )
+                        
+                        with col4:
+                            company_info = scorer.data['fundamental']['company_info']
+                            st.metric(
+                                "Beta",
+                                f"{company_info.get('Beta', 0):.2f}",
+                                f"{company_info.get('Beta', 0) - 1:.2f}"
+                            )
+                            # Try different possible keys for foreign ownership room and convert to percentage
+                            foreign_room = (
+                                company_info.get('Room nước ngoài', 0) or 
+                                company_info.get('foreignPercent', 0) or 
+                                company_info.get('foreignOwnership', 0) or 
+                                company_info.get('foreign_ownership', 0)
+                            )
+                            # Convert to percentage if not already in percentage form
+                            if foreign_room > 1:
+                                foreign_room = foreign_room / 100
+                            st.metric(
+                                "Room NN",
+                                f"{foreign_room * 100:.2f}%",
+                                f"{foreign_room * 100 - 30:.2f}%"
+                            )
+                        
+                        # Display financial score
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.plotly_chart(
+                                chart_creator.create_gauge_chart(
+                                    financial_result['final_score'],
+                                    f"Điểm Số Tài Chính - {symbol}"
+                                ),
+                                use_container_width=True
+                            )
+                        
+                        with col2:
+                            st.plotly_chart(
+                                chart_creator.create_trend_chart(
+                                    financial_result['business_cycle']['yearly_revenue_growth'],
+                                    f"Tăng Trưởng Doanh Thu - {symbol}",
+                                    "Tăng Trưởng (%)"
+                                ),
+                                use_container_width=True
+                            )
+                        
+                        # Display ROE and Equity charts
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.plotly_chart(
+                                chart_creator.create_roe_chart(
+                                    scorer.data['yearly']
+                                ),
+                                use_container_width=True
+                            )
+                        
+                        with col2:
+                            st.plotly_chart(
+                                chart_creator.create_equity_chart(
+                                    scorer.data['yearly']
+                                ),
+                                use_container_width=True
+                            )
+                        
+                        # Display dividend chart
+                        st.plotly_chart(
+                            chart_creator.create_dividend_chart(
+                                scorer.data['yearly']
+                            ),
+                            use_container_width=True
+                        )
+                    
+                    with tab2:
+                        # Calculate technical indicators first
+                        price_data_with_indicators = price_analyzer.calculate_technical_indicators()
+                        
+                        # Display price trend chart
+                        st.plotly_chart(
+                            chart_creator.create_price_trend_chart(price_data_with_indicators),
+                            use_container_width=True
+                        )
+                        
+                        # Display technical indicators
+                        st.plotly_chart(
+                            chart_creator.create_technical_indicators_chart(price_data_with_indicators),
+                            use_container_width=True
+                        )
+                        
+                        # Display price analysis score
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.plotly_chart(
+                                chart_creator.create_gauge_chart(
+                                    price_analysis['final_score'],
+                                    f"Điểm Số Xu Hướng Giá - {symbol}"
+                                ),
+                                use_container_width=True
+                            )
+                        
+                        with col2:
+                            st.metric(
+                                "Điểm Số Xu Hướng",
+                                f"{price_analysis['final_score']:.2f}/100",
+                                f"{price_analysis['final_score'] - 50:.2f}"
+                            )
+                    
+                    with tab3:
+                        st.subheader("Dự Đoán Giá Sử Dụng AI")
+                        st.write("Mô hình AI được sử dụng để dự đoán xu hướng giá trong tương lai")
+                        
+                        if st.button("Chạy Dự Đoán"):
+                            logger.info(f"Price prediction button clicked for symbol: {symbol}")
+                            try:
+                                with st.spinner("Đang lấy dữ liệu giá..."):
+                                    # Fetch historical price data from API
+                                    end_date = datetime.now()
+                                    days=365
+                                    start_date = end_date - timedelta(days=days)  # 1 years
+                                    start_date_str = start_date.strftime('%m/%d/%Y')
+                                    end_date_str = end_date.strftime('%m/%d/%Y')
+                                    
+                                    logger.info(f"Fetching price data for {symbol} from {start_date_str} to {end_date_str}")
+                                    price_data = api_client.get_historical_quotes(symbol, start_date_str, end_date_str, offset=0, limit=days)
+                                    
+                                    if not price_data:
+                                        st.error("Không thể lấy dữ liệu giá từ API. Vui lòng thử lại sau.")
+                                        return
+                                        
+                                    # Convert to DataFrame
+                                    price_df = pd.DataFrame(price_data)
+                                    price_df['date'] = pd.to_datetime(price_df['date'])
+                                    price_df.set_index('date', inplace=True)
+                                    
+                                    if 'priceClose' not in price_df.columns:
+                                        st.error("Dữ liệu giá không có cột 'priceClose'. Vui lòng thử lại sau.")
+                                        return
+                                        
+                                    price_df = price_df.sort_index()
+                                    
+                                    logger.info(f"Got {len(price_df)} days of price data")
+                                    
+                                    if len(price_df) < 60:
+                                        st.error(f"Không đủ dữ liệu để thực hiện dự đoán. Cần ít nhất 60 ngày dữ liệu giá, hiện có {len(price_df)} ngày.")
+                                        return
+                                        
+                                with st.spinner("Đang huấn luyện mô hình AI..."):
+                                    logger.info("Initializing PricePredictor")
+                                    # Initialize and train the model
+                                    predictor = PricePredictor()
+                                    logger.info("Training model...")
+                                    prediction_result = predictor.train(price_df, symbol)
+                                    
+                                    logger.info("Getting next days predictions")
+                                    # Get predictions for next 5 days
+                                    next_days_predictions = predictor.predict_next_days(price_df, symbol)
+                                    
+                                    # Display current prediction
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        st.metric(
+                                            "Giá Dự Đoán Ngày Mai",
+                                            f"{prediction_result['predicted_price']:,.0f}",
+                                            f"{prediction_result['predicted_price'] - price_df['priceClose'].iloc[-1]:,.0f}"
+                                        )
+                                    
+                                    with col2:
+                                        avg_score = (prediction_result['model_metrics']['rf_score'] + prediction_result['model_metrics']['xgb_score']) / 2
+                                        st.metric(
+                                            "Độ Tin Cậy Mô Hình",
+                                            f"{avg_score:.2%}",
+                                            f"{prediction_result['model_metrics']['rf_score']:.2%} - {prediction_result['model_metrics']['xgb_score']:.2%}"
+                                        )
+                                    
+                                    # Create prediction chart
+                                    fig = go.Figure()
+                                    
+                                    # Add historical prices
+                                    fig.add_trace(go.Scatter(
+                                        x=price_df.index,
+                                        y=price_df['priceClose'],
+                                        name='Giá Lịch Sử',
+                                        line=dict(color='blue')
+                                    ))
+                                    
+                                    # Add predicted prices
+                                    future_dates = pd.date_range(
+                                        start=price_df.index[-1] + pd.Timedelta(days=1),
+                                        periods=len(next_days_predictions),
+                                        freq='D'
+                                    )
+                                    
+                                    predicted_prices = [p['predicted_price'] for p in next_days_predictions]
+                                    confidence_lower = [p['confidence_interval']['lower'] for p in next_days_predictions]
+                                    confidence_upper = [p['confidence_interval']['upper'] for p in next_days_predictions]
+                                    
+                                    fig.add_trace(go.Scatter(
+                                        x=future_dates,
+                                        y=predicted_prices,
+                                        name='Dự Đoán',
+                                        line=dict(color='red', dash='dash')
+                                    ))
+                                    
+                                    # Add confidence interval
+                                    fig.add_trace(go.Scatter(
+                                        x=future_dates.tolist() + future_dates.tolist()[::-1],
+                                        y=confidence_upper + confidence_lower[::-1],
+                                        fill='toself',
+                                        fillcolor='rgba(255,0,0,0.1)',
+                                        line=dict(color='rgba(255,0,0,0)'),
+                                        name='Khoảng Tin Cậy'
+                                    ))
+                                    
+                                    fig.update_layout(
+                                        title=f"Dự Đoán Giá {symbol}",
+                                        xaxis_title="Ngày",
+                                        yaxis_title="Giá",
+                                        showlegend=True
+                                    )
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                                    
+                                    # Display detailed predictions
+                                    st.subheader("Dự Đoán Chi Tiết")
+                                    prediction_df = pd.DataFrame([
+                                        {
+                                            'Ngày': future_dates[i],
+                                            'Giá Dự Đoán': f"{p['predicted_price']:,.0f}",
+                                            'Khoảng Tin Cậy': f"{p['confidence_interval']['lower']:,.0f} - {p['confidence_interval']['upper']:,.0f}"
+                                        }
+                                        for i, p in enumerate(next_days_predictions)
+                                    ])
+                                    st.dataframe(prediction_df, use_container_width=True)
+                                    
+                            except ValueError as e:
+                                logger.error(f"ValueError in price prediction: {str(e)}")
+                                st.error(f"Lỗi khi dự đoán giá: {str(e)}")
+                                st.info("Vui lòng đảm bảo có đủ dữ liệu giá (ít nhất 60 ngày) và thử lại.")
+                            except Exception as e:
+                                logger.error(f"Unexpected error in price prediction: {str(e)}")
+                                st.error(f"Lỗi không mong muốn: {str(e)}")
+                                st.info("Vui lòng thử lại sau.")
+                    
+                    with tab4:
+                        # Add a button to generate reports
+                        if st.button("Tạo Báo Cáo Chi Tiết"):
+                            with st.spinner("Đang tạo báo cáo chi tiết..."):
+                                financial_report = report_generator.generate_financial_report(scorer, financial_result)
+                                price_report = report_generator.generate_price_analysis_report(price_analysis, price_data)
+                                
+                                # Display detailed reports
+                                st.subheader("Báo Cáo Phân Tích Tài Chính")
+                                st.write(financial_report)
+                                
+                                st.subheader("Báo Cáo Phân Tích Xu Hướng Giá")
+                                st.write(price_report)
+                        else:
+                            st.info("Nhấn nút 'Tạo Báo Cáo Chi Tiết' để xem phân tích chi tiết được tạo bởi AI.")
             
             except Exception as e:
                 logger.error(f"Error in main analysis: {str(e)}")
@@ -200,137 +509,19 @@ def main():
             except Exception as e:
                 st.error(f"Lỗi khi phân tích danh mục: {str(e)}")
                 st.error("Vui lòng kiểm tra lại danh sách mã chứng khoán và thử lại.")
-    elif menu_option == "Trợ Lý Đầu Tư":
-        st.title("Trợ Lý Đầu Tư AI")
-        st.write("Tương tác với AI để nhận tư vấn và phân tích về đầu tư chứng khoán")
+    elif menu_option == "So Sánh Cổ Phiếu":
+        st.title("So Sánh Cổ Phiếu")
+        st.write("So sánh các chỉ số tài chính giữa các cổ phiếu")
         
-        # Initialize session state for chat history if it doesn't exist
-        if "messages" not in st.session_state:
-            st.session_state.messages = []
-            # Add welcome message
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": "Xin chào! Tôi là trợ lý AI của bạn. Tôi có thể giúp bạn phân tích và tư vấn về đầu tư chứng khoán. Bạn có thể hỏi tôi về:\n\n"
-                "1. Phân tích tài chính của một công ty\n"
-                "2. Xu hướng giá và chỉ báo kỹ thuật\n"
-                "3. Dự báo giá trong tương lai\n"
-                "4. So sánh các cổ phiếu\n"
-                "5. Tư vấn phân bổ danh mục\n\n"
-                "Hãy nhập mã chứng khoán và câu hỏi của bạn!"
-            })
+        # Placeholder for stock comparison feature
+        st.info("Tính năng so sánh cổ phiếu đang được phát triển. Vui lòng quay lại sau!")
         
-        # Display chat messages
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+    elif menu_option == "Cài Đặt":
+        st.title("Cài Đặt")
+        st.write("Tùy chỉnh các thông số phân tích")
         
-        # Get user input
-        if prompt := st.chat_input("Nhập câu hỏi của bạn..."):
-            # Add user message to chat history
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            
-            # Display user message
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            
-            # Process the query
-            try:
-                with st.spinner("Đang xử lý..."):
-                    # Extract stock symbol and financial metric from the prompt
-                    common_metrics = {
-                        'ROE', 'ROA', 'P/E', 'EPS', 'FCF', 'PE', 'PB', 'PS', 'EV', 'EBITDA', 
-                        'NIM', 'CIR', 'CLR', 'LDR', 'LAR', 'ROE', 'ROA', 'P/E', 'EPS', 'FCF', 
-                        'PE', 'PB', 'PS', 'EV', 'EBITDA', 'NIM', 'CIR', 'CLR', 'LDR', 'LAR'
-                    }
-                    
-                    # First try to find a stock symbol (2-3 uppercase letters not in common_metrics)
-                    symbols = [
-                        word for word in prompt.split() 
-                        if word.isupper() 
-                        and len(word) <= 3 
-                        and word not in common_metrics
-                    ]
-                    symbol = symbols[0] if symbols else None
-                    
-                    # Then try to find a financial metric
-                    metrics = [
-                        word for word in prompt.split() 
-                        if word.isupper() 
-                        and word in common_metrics
-                    ]
-                    metric = metrics[0] if metrics else None
-                    
-                    # Extract time period if mentioned
-                    time_period = None
-                    if '5' in prompt:
-                        time_period = 5
-                    elif '10' in prompt:
-                        time_period = 10
-                    elif '3' in prompt:
-                        time_period = 3
-                    
-                    # Prepare context for the AI
-                    context = ""
-                    if symbol and metric:
-                        try:
-                            # Initialize components
-                            api_client = FireantAPI()
-                            scorer = CompanyScorer(symbol, api_client)
-                            
-                            # Get the metric value
-                            if metric == 'ROE':
-                                value = scorer.data['latest'].get('ROE', 0) * 100
-                            elif metric == 'ROA':
-                                value = scorer.data['latest'].get('NetProfitFromOperatingActivity', 0) / scorer.data['latest'].get('TotalAsset', 1) * 100
-                            elif metric == 'P/E':
-                                value = scorer.data['fundamental']['financial_metrics']['P/E']
-                            elif metric == 'EPS':
-                                value = scorer.data['fundamental']['financial_metrics']['EPS']
-                            elif metric == 'FCF':
-                                value = scorer.data['latest'].get('FreeCashFlow', 0)
-                            else:
-                                value = 0
-                            
-                            context = f"""
-                            Thông tin {metric} của {symbol}:
-                            - Giá trị hiện tại: {value:.2f}
-                            - Công ty: {scorer.data['fundamental']['company_info']['Tên công ty']}
-                            - Sàn: {scorer.data['fundamental']['company_info']['Sàn']}
-                            """
-                        except Exception as e:
-                            context = f"Không thể lấy dữ liệu {metric} cho {symbol}. Lỗi: {str(e)}"
-                    
-                    # Prepare the prompt for the AI
-                    ai_prompt = f"""
-                    Bạn là một trợ lý AI chuyên về phân tích đầu tư chứng khoán. 
-                    Hãy trả lời câu hỏi sau của người dùng một cách chuyên nghiệp và hữu ích.
-                    
-                    {context}
-                    
-                    Câu hỏi của người dùng: {prompt}
-                    
-                    Hãy trả lời bằng tiếng Việt và đảm bảo:
-                    1. Sử dụng ngôn ngữ dễ hiểu
-                    2. Cung cấp thông tin chi tiết và có căn cứ
-                    3. Đưa ra khuyến nghị rõ ràng nếu được yêu cầu
-                    4. Luôn nhắc nhở về rủi ro đầu tư
-                    """
-                    
-                    # Get AI response
-                    response = model.generate_content(ai_prompt)
-                    
-                    # Add assistant response to chat history
-                    st.session_state.messages.append({"role": "assistant", "content": response.text})
-                    
-                    # Display assistant response
-                    with st.chat_message("assistant"):
-                        st.markdown(response.text)
-                        
-            except Exception as e:
-                error_message = f"Xin lỗi, đã xảy ra lỗi khi xử lý câu hỏi của bạn: {str(e)}"
-                st.session_state.messages.append({"role": "assistant", "content": error_message})
-                with st.chat_message("assistant"):
-                    st.markdown(error_message)
+        # Placeholder for settings
+        st.info("Tính năng cài đặt đang được phát triển. Vui lòng quay lại sau!")
 
 if __name__ == "__main__":
     main() 
