@@ -10,8 +10,15 @@ from src.analyzers.company_scorer import CompanyScorer
 from src.analyzers.price_analyzer import PriceTrendAnalyzer
 from src.analyzers.report_generator import ReportGenerator
 from src.analyzers.portfolio_analyzer import PortfolioAnalyzer
+from src.analyzers.price_predictor import PricePredictor
 from src.charts.chart_creator import ChartCreator
 from src.utils.api_client import FireantAPI
+import logging
+from datetime import datetime, timedelta
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -64,7 +71,7 @@ def main():
                     st.markdown(f"**Loại Công Ty:** {'Ngân Hàng' if scorer.company_type == 'bank' else 'Công Ty Thường'}")
                     
                     # Display results in tabs
-                    tab1, tab2, tab3 = st.tabs(["Phân Tích Tài Chính", "Phân Tích Xu Hướng Giá", "Báo Cáo Chi Tiết"])
+                    tab1, tab2, tab3, tab4 = st.tabs(["Phân Tích Tài Chính", "Phân Tích Xu Hướng Giá", "Dự Đoán Giá AI", "Báo Cáo Chi Tiết"])
                     
                     with tab1:
                         # Display key financial metrics
@@ -235,6 +242,142 @@ def main():
                             )
                     
                     with tab3:
+                        st.subheader("Dự Đoán Giá Sử Dụng AI")
+                        st.write("Mô hình AI được sử dụng để dự đoán xu hướng giá trong tương lai")
+                        
+                        if st.button("Chạy Dự Đoán"):
+                            logger.info(f"Price prediction button clicked for symbol: {symbol}")
+                            try:
+                                with st.spinner("Đang lấy dữ liệu giá..."):
+                                    # Fetch historical price data from API
+                                    end_date = datetime.now()
+                                    days=365
+                                    start_date = end_date - timedelta(days=days)  # 1 years
+                                    start_date_str = start_date.strftime('%m/%d/%Y')
+                                    end_date_str = end_date.strftime('%m/%d/%Y')
+                                    
+                                    logger.info(f"Fetching price data for {symbol} from {start_date_str} to {end_date_str}")
+                                    price_data = api_client.get_historical_quotes(symbol, start_date_str, end_date_str, offset=0, limit=days)
+                                    
+                                    if not price_data:
+                                        st.error("Không thể lấy dữ liệu giá từ API. Vui lòng thử lại sau.")
+                                        return
+                                        
+                                    # Convert to DataFrame
+                                    price_df = pd.DataFrame(price_data)
+                                    price_df['date'] = pd.to_datetime(price_df['date'])
+                                    price_df.set_index('date', inplace=True)
+                                    
+                                    if 'priceClose' not in price_df.columns:
+                                        st.error("Dữ liệu giá không có cột 'priceClose'. Vui lòng thử lại sau.")
+                                        return
+                                        
+                                    price_df = price_df.sort_index()
+                                    
+                                    logger.info(f"Got {len(price_df)} days of price data")
+                                    
+                                    if len(price_df) < 60:
+                                        st.error(f"Không đủ dữ liệu để thực hiện dự đoán. Cần ít nhất 60 ngày dữ liệu giá, hiện có {len(price_df)} ngày.")
+                                        return
+                                        
+                                with st.spinner("Đang huấn luyện mô hình AI..."):
+                                    logger.info("Initializing PricePredictor")
+                                    # Initialize and train the model
+                                    predictor = PricePredictor()
+                                    logger.info("Training model...")
+                                    prediction_result = predictor.train(price_df, symbol)
+                                    
+                                    logger.info("Getting next days predictions")
+                                    # Get predictions for next 5 days
+                                    next_days_predictions = predictor.predict_next_days(price_df, symbol)
+                                    
+                                    # Display current prediction
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        st.metric(
+                                            "Giá Dự Đoán Ngày Mai",
+                                            f"{prediction_result['predicted_price']:,.0f}",
+                                            f"{prediction_result['predicted_price'] - price_df['priceClose'].iloc[-1]:,.0f}"
+                                        )
+                                    
+                                    with col2:
+                                        avg_score = (prediction_result['model_metrics']['rf_score'] + prediction_result['model_metrics']['xgb_score']) / 2
+                                        st.metric(
+                                            "Độ Tin Cậy Mô Hình",
+                                            f"{avg_score:.2%}",
+                                            f"{prediction_result['model_metrics']['rf_score']:.2%} - {prediction_result['model_metrics']['xgb_score']:.2%}"
+                                        )
+                                    
+                                    # Create prediction chart
+                                    fig = go.Figure()
+                                    
+                                    # Add historical prices
+                                    fig.add_trace(go.Scatter(
+                                        x=price_df.index,
+                                        y=price_df['priceClose'],
+                                        name='Giá Lịch Sử',
+                                        line=dict(color='blue')
+                                    ))
+                                    
+                                    # Add predicted prices
+                                    future_dates = pd.date_range(
+                                        start=price_df.index[-1] + pd.Timedelta(days=1),
+                                        periods=len(next_days_predictions),
+                                        freq='D'
+                                    )
+                                    
+                                    predicted_prices = [p['predicted_price'] for p in next_days_predictions]
+                                    confidence_lower = [p['confidence_interval']['lower'] for p in next_days_predictions]
+                                    confidence_upper = [p['confidence_interval']['upper'] for p in next_days_predictions]
+                                    
+                                    fig.add_trace(go.Scatter(
+                                        x=future_dates,
+                                        y=predicted_prices,
+                                        name='Dự Đoán',
+                                        line=dict(color='red', dash='dash')
+                                    ))
+                                    
+                                    # Add confidence interval
+                                    fig.add_trace(go.Scatter(
+                                        x=future_dates.tolist() + future_dates.tolist()[::-1],
+                                        y=confidence_upper + confidence_lower[::-1],
+                                        fill='toself',
+                                        fillcolor='rgba(255,0,0,0.1)',
+                                        line=dict(color='rgba(255,0,0,0)'),
+                                        name='Khoảng Tin Cậy'
+                                    ))
+                                    
+                                    fig.update_layout(
+                                        title=f"Dự Đoán Giá {symbol}",
+                                        xaxis_title="Ngày",
+                                        yaxis_title="Giá",
+                                        showlegend=True
+                                    )
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                                    
+                                    # Display detailed predictions
+                                    st.subheader("Dự Đoán Chi Tiết")
+                                    prediction_df = pd.DataFrame([
+                                        {
+                                            'Ngày': future_dates[i],
+                                            'Giá Dự Đoán': f"{p['predicted_price']:,.0f}",
+                                            'Khoảng Tin Cậy': f"{p['confidence_interval']['lower']:,.0f} - {p['confidence_interval']['upper']:,.0f}"
+                                        }
+                                        for i, p in enumerate(next_days_predictions)
+                                    ])
+                                    st.dataframe(prediction_df, use_container_width=True)
+                                    
+                            except ValueError as e:
+                                logger.error(f"ValueError in price prediction: {str(e)}")
+                                st.error(f"Lỗi khi dự đoán giá: {str(e)}")
+                                st.info("Vui lòng đảm bảo có đủ dữ liệu giá (ít nhất 60 ngày) và thử lại.")
+                            except Exception as e:
+                                logger.error(f"Unexpected error in price prediction: {str(e)}")
+                                st.error(f"Lỗi không mong muốn: {str(e)}")
+                                st.info("Vui lòng thử lại sau.")
+                    
+                    with tab4:
                         # Add a button to generate reports
                         if st.button("Tạo Báo Cáo Chi Tiết"):
                             with st.spinner("Đang tạo báo cáo chi tiết..."):
@@ -251,6 +394,7 @@ def main():
                             st.info("Nhấn nút 'Tạo Báo Cáo Chi Tiết' để xem phân tích chi tiết được tạo bởi AI.")
             
             except Exception as e:
+                logger.error(f"Error in main analysis: {str(e)}")
                 st.error(f"Lỗi khi phân tích: {str(e)}")
                 st.error("Vui lòng kiểm tra lại mã chứng khoán và thử lại.")
     elif menu_option == "Phân Bổ Danh Mục":
