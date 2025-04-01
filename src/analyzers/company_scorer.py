@@ -4,6 +4,20 @@ from src.config.settings import BANK_WEIGHTS, GENERAL_WEIGHTS, ANALYSIS_THRESHOL
 from src.utils.api_client import FireantAPI
 
 class CompanyScorer:
+    # Define profit columns at class level
+    PROFIT_COLUMNS = [
+        'NetProfitFromOperatingActivity',
+        'OperatingProfit',
+        'OperatingIncome',
+        'OperatingActivities',
+        'OperatingCashFlow',
+        'CashFlowFromOperatingActivities',
+        'OperatingActivitiesCashFlow',
+        'CashFlowFromOperations',
+        'NetIncome',
+        'ProfitAfterTax'
+    ]
+
     def __init__(self, symbol: str, api_client: FireantAPI = None):
         self.symbol = symbol
         self.api = api_client if api_client else FireantAPI()
@@ -21,6 +35,10 @@ class CompanyScorer:
         for item in data:
             if 'financialValues' in item:
                 financial_values = item['financialValues']
+                
+                # Print available columns for debugging
+                print(f"Available financial columns: {list(financial_values.keys())}")
+                
                 # Calculate dividend yield if not present
                 if 'DividendYield' not in financial_values:
                     price = financial_values.get('PriceAtPeriodEnd', 0)
@@ -32,7 +50,13 @@ class CompanyScorer:
                 
                 # Calculate cash dividend if not present
                 if 'CashDividend' not in financial_values:
-                    net_profit = financial_values.get('NetProfitFromOperatingActivity', 0)
+                    net_profit = 0
+                    for col in self.PROFIT_COLUMNS:
+                        if col in financial_values:
+                            net_profit = financial_values[col]
+                            print(f"Found profit column: {col}")
+                            break
+                    
                     if net_profit > 0:
                         financial_values['CashDividend'] = net_profit * 0.3
                     else:
@@ -41,6 +65,15 @@ class CompanyScorer:
                 # Set stock dividend to 0 if not present
                 if 'StockDividend' not in financial_values:
                     financial_values['StockDividend'] = 0
+                    
+                # Add NetProfitFromOperatingActivity if not present
+                if 'NetProfitFromOperatingActivity' not in financial_values:
+                    # Try to find a suitable replacement
+                    for col in self.PROFIT_COLUMNS:
+                        if col in financial_values:
+                            financial_values['NetProfitFromOperatingActivity'] = financial_values[col]
+                            print(f"Using {col} as NetProfitFromOperatingActivity")
+                            break
         return data
     
     def _fetch_fundamental_data(self) -> Dict[str, Any]:

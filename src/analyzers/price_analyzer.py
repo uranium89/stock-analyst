@@ -2,12 +2,14 @@ import pandas as pd
 from typing import Dict, Any
 from src.config.settings import TECHNICAL_PARAMS
 from src.utils.api_client import FireantAPI
+from src.analyzers.ai_price_predictor import AIPricePredictor
 
 class PriceTrendAnalyzer:
     def __init__(self, symbol: str, api_client: FireantAPI = None):
         self.symbol = symbol
         self.api = api_client if api_client else FireantAPI()
         self.price_data = self._fetch_price_data()
+        self.ai_predictor = AIPricePredictor(symbol, api_client)
         
     def _fetch_price_data(self) -> pd.DataFrame:
         """Fetch historical price data"""
@@ -57,6 +59,17 @@ class PriceTrendAnalyzer:
         df = self.calculate_technical_indicators()
         latest = df.iloc[-1]
         
+        # Train AI model and get prediction
+        try:
+            ai_metrics = self.ai_predictor.train()
+            ai_prediction = self.ai_predictor.predict()
+            ai_importance = self.ai_predictor.get_feature_importance()
+        except Exception as e:
+            print(f"AI prediction failed: {str(e)}")
+            ai_prediction = None
+            ai_metrics = None
+            ai_importance = None
+        
         # Trend signals
         signals = {
             'price_trend': {
@@ -83,6 +96,17 @@ class PriceTrendAnalyzer:
                 'trend': 'Tăng' if df['dealVolume'].iloc[-5:].mean() > df['dealVolume'].iloc[-20:-5].mean() else 'Giảm'
             }
         }
+        
+        # Add AI prediction if available
+        if ai_prediction:
+            signals['ai_prediction'] = {
+                'trend': ai_prediction['trend'],
+                'predicted_return': ai_prediction['predicted_return'],
+                'confidence': ai_prediction['confidence'],
+                'strength': ai_prediction['strength'],
+                'model_performance': ai_metrics,
+                'top_features': dict(list(ai_importance.items())[:5])
+            }
         
         # Calculate trend score (0-100)
         score = 0
@@ -112,6 +136,13 @@ class PriceTrendAnalyzer:
         # Volume trend contribution (20 points)
         if signals['volume_analysis']['trend'] == 'Tăng':
             score += 20
+        
+        # Add AI prediction contribution if available
+        if ai_prediction:
+            if ai_prediction['trend'] == 'Tăng':
+                score += 10
+            if ai_prediction['strength'] == 'Mạnh':
+                score += 10
         
         signals['final_score'] = score
         return signals 

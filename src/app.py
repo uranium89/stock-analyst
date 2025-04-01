@@ -95,11 +95,50 @@ def main():
                                 f"{latest.get('ROE', 0) * 100:.2f}%",
                                 f"{latest.get('ROE', 0) * 100 - 15:.2f}%"
                             )
-                            st.metric(
-                                "ROA",
-                                f"{latest.get('NetProfitFromOperatingActivity', 0) / latest.get('TotalAsset', 1) * 100:.2f}%",
-                                f"{latest.get('NetProfitFromOperatingActivity', 0) / latest.get('TotalAsset', 1) * 100 - 5:.2f}%"
-                            )
+                            # Calculate ROA with fallback options
+                            try:
+                                # Print available columns for debugging
+                                print(f"Available financial columns: {list(latest.keys())}")
+                                
+                                # Try different possible column names for operating profit
+                                profit_columns = [
+                                    'NetProfitFromOperatingActivity',
+                                    'OperatingProfit',
+                                    'OperatingIncome',
+                                    'OperatingActivities',
+                                    'OperatingCashFlow',
+                                    'CashFlowFromOperatingActivities',
+                                    'OperatingActivitiesCashFlow',
+                                    'CashFlowFromOperations',
+                                    'NetIncome',  # Fallback to net income if operating profit not available
+                                    'ProfitAfterTax'  # Another common name for net income
+                                ]
+                                
+                                operating_profit = 0
+                                for col in profit_columns:
+                                    if col in latest:
+                                        operating_profit = latest[col]
+                                        print(f"Found profit column: {col}")
+                                        break
+                                
+                                if operating_profit == 0:
+                                    print("Warning: No profit data found in available columns")
+                                
+                                total_assets = latest.get('TotalAsset', 1)
+                                roa = (operating_profit / total_assets) * 100 if total_assets > 0 else 0
+                                
+                                st.metric(
+                                    "ROA",
+                                    f"{roa:.2f}%",
+                                    f"{roa - 5:.2f}%"
+                                )
+                            except Exception as e:
+                                print(f"Warning: Could not calculate ROA: {str(e)}")
+                                st.metric(
+                                    "ROA",
+                                    "N/A",
+                                    "Không có dữ liệu"
+                                )
                             payback = scorer.payback_analysis
                             st.metric(
                                 "Thời Gian Hoàn Vốn",
@@ -201,6 +240,122 @@ def main():
                         )
                     
                     with tab2:
+                        # Display AI Prediction with detailed error handling
+                        st.subheader("Dự Đoán AI")
+                        try:
+                            if 'ai_prediction' in price_analysis:
+                                ai_pred = price_analysis['ai_prediction']
+                                
+                                # Create columns for AI metrics
+                                col1, col2, col3, col4 = st.columns(4)
+                                
+                                with col1:
+                                    st.metric(
+                                        "Xu Hướng Dự Đoán",
+                                        ai_pred['trend'],
+                                        f"{ai_pred['predicted_return']:.2%}"
+                                    )
+                                
+                                with col2:
+                                    st.metric(
+                                        "Độ Tin Cậy",
+                                        f"{ai_pred['confidence']:.2%}",
+                                        "Cao" if ai_pred['confidence'] > 0.02 else "Trung Bình" if ai_pred['confidence'] > 0.01 else "Thấp"
+                                    )
+                                
+                                with col3:
+                                    st.metric(
+                                        "Sức Mạnh Tín Hiệu",
+                                        ai_pred['strength'],
+                                        f"R²: {ai_pred['model_performance']['test_score']:.2f}"
+                                    )
+                                
+                                with col4:
+                                    st.metric(
+                                        "Độ Chính Xác",
+                                        f"{ai_pred['model_performance']['test_score']:.2%}",
+                                        f"{ai_pred['model_performance']['test_score'] - 0.5:.2%}"
+                                    )
+                                
+                                # Display top features
+                                st.subheader("Các Chỉ Số Quan Trọng Nhất")
+                                feature_cols = st.columns(5)
+                                for i, (feature, importance) in enumerate(list(ai_pred['top_features'].items())[:5]):
+                                    with feature_cols[i]:
+                                        st.metric(
+                                            feature,
+                                            f"{importance:.2f}",
+                                            "Quan trọng" if importance > 0.1 else "Trung bình" if importance > 0.05 else "Thấp"
+                                        )
+                            else:
+                                st.warning("Không tìm thấy dự đoán AI trong kết quả phân tích.")
+                                st.info("Đang thử tạo dự đoán AI...")
+                                
+                                # Try to create AI prediction directly
+                                ai_metrics = price_analyzer.ai_predictor.train()
+                                ai_prediction = price_analyzer.ai_predictor.predict()
+                                ai_importance = price_analyzer.ai_predictor.get_feature_importance()
+                                
+                                # Update price_analysis with AI prediction
+                                price_analysis['ai_prediction'] = {
+                                    'trend': ai_prediction['trend'],
+                                    'predicted_return': ai_prediction['predicted_return'],
+                                    'confidence': ai_prediction['confidence'],
+                                    'strength': ai_prediction['strength'],
+                                    'model_performance': ai_metrics,
+                                    'top_features': dict(list(ai_importance.items())[:5])
+                                }
+                                
+                                # Display the prediction
+                                ai_pred = price_analysis['ai_prediction']
+                                
+                                # Create columns for AI metrics
+                                col1, col2, col3, col4 = st.columns(4)
+                                
+                                with col1:
+                                    st.metric(
+                                        "Xu Hướng Dự Đoán",
+                                        ai_pred['trend'],
+                                        f"{ai_pred['predicted_return']:.2%}"
+                                    )
+                                
+                                with col2:
+                                    st.metric(
+                                        "Độ Tin Cậy",
+                                        f"{ai_pred['confidence']:.2%}",
+                                        "Cao" if ai_pred['confidence'] > 0.02 else "Trung Bình" if ai_pred['confidence'] > 0.01 else "Thấp"
+                                    )
+                                
+                                with col3:
+                                    st.metric(
+                                        "Sức Mạnh Tín Hiệu",
+                                        ai_pred['strength'],
+                                        f"R²: {ai_pred['model_performance']['test_score']:.2f}"
+                                    )
+                                
+                                with col4:
+                                    st.metric(
+                                        "Độ Chính Xác",
+                                        f"{ai_pred['model_performance']['test_score']:.2%}",
+                                        f"{ai_pred['model_performance']['test_score'] - 0.5:.2%}"
+                                    )
+                                
+                                # Display top features
+                                st.subheader("Các Chỉ Số Quan Trọng Nhất")
+                                feature_cols = st.columns(5)
+                                for i, (feature, importance) in enumerate(list(ai_pred['top_features'].items())[:5]):
+                                    with feature_cols[i]:
+                                        st.metric(
+                                            feature,
+                                            f"{importance:.2f}",
+                                            "Quan trọng" if importance > 0.1 else "Trung bình" if importance > 0.05 else "Thấp"
+                                        )
+                        except Exception as e:
+                            st.error(f"Lỗi khi tạo dự đoán AI: {str(e)}")
+                            st.error("Chi tiết lỗi:")
+                            st.exception(e)
+                            st.info("Vui lòng thử lại sau hoặc liên hệ hỗ trợ nếu lỗi vẫn tiếp tục.")
+                        
                         # Calculate technical indicators first
                         price_data_with_indicators = price_analyzer.calculate_technical_indicators()
                         
