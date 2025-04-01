@@ -226,4 +226,68 @@ class ReportGenerator:
             response = self.model.generate_content(prompt)
             return response.text
         except Exception as e:
-            return f"Lỗi khi tạo báo cáo xu hướng giá: {str(e)}" 
+            return f"Lỗi khi tạo báo cáo xu hướng giá: {str(e)}"
+    
+    def generate_market_report(self, df: pd.DataFrame, ai_prediction: Dict[str, Any], ai_metrics: Dict[str, Any], ai_importance: Dict[str, float]) -> str:
+        """Generate a detailed market analysis report using Gemini AI"""
+        latest = df.iloc[-1]
+        prev = df.iloc[-2]
+        
+        # Calculate market trend
+        ma20 = df['MA20'].iloc[-1]
+        ma50 = df['MA50'].iloc[-1]
+        ma200 = df['MA200'].iloc[-1]
+        current_price = df['priceClose'].iloc[-1]
+        
+        # Determine market trend
+        if current_price > ma20 > ma50 > ma200:
+            trend = "Xu hướng tăng mạnh"
+        elif current_price > ma20 > ma50:
+            trend = "Xu hướng tăng"
+        elif current_price < ma20 < ma50 < ma200:
+            trend = "Xu hướng giảm mạnh"
+        elif current_price < ma20 < ma50:
+            trend = "Xu hướng giảm"
+        else:
+            trend = "Xu hướng đi ngang"
+        
+        # Calculate volume trend
+        volume_ma20 = df['dealVolume'].rolling(window=20).mean().iloc[-1]
+        current_volume = df['dealVolume'].iloc[-1]
+        volume_trend = "Cao hơn" if current_volume > volume_ma20 else "Thấp hơn"
+        
+        # Prepare prompt for Gemini
+        prompt = f"""
+        Phân tích chi tiết thị trường chứng khoán Việt Nam (VNINDEX):
+        
+        Thông Tin Cơ Bản:
+        - Giá đóng cửa: {latest['priceClose']:,.2f}
+        - Thay đổi: {((latest['priceClose'] - prev['priceClose']) / prev['priceClose'] * 100):.2f}%
+        - Khối lượng: {current_volume:,.0f} ({volume_trend} trung bình 20 phiên)
+        
+        Xu Hướng Thị Trường:
+        - Xu hướng hiện tại: {trend}
+        - RSI: {latest['RSI']:.2f} ({'Quá mua' if latest['RSI'] > 70 else 'Quá bán' if latest['RSI'] < 30 else 'Trung tính'})
+        - MACD: {'Tín hiệu mua' if latest['MACD'] > latest['Signal_Line'] else 'Tín hiệu bán'}
+        
+        Chỉ Báo Kỹ Thuật:
+        - MA20: {ma20:,.2f}
+        - MA50: {ma50:,.2f}
+        - MA200: {ma200:,.2f}
+        - Bollinger Bands: {'Quá mua' if current_price > latest['BB_upper'] else 'Quá bán' if current_price < latest['BB_lower'] else 'Trung tính'}
+        
+        Dự Đoán AI:
+        - Xu hướng dự đoán: {ai_prediction['trend']}
+        - Độ tin cậy: {ai_prediction['confidence']:.2%}
+        - Sức mạnh tín hiệu: {ai_prediction['strength']}
+        - Độ chính xác mô hình: {ai_metrics['test_score']:.2%}
+        
+        Các Chỉ Số Quan Trọng Nhất:
+        {', '.join([f"{k}: {v:.2f}" for k, v in list(ai_importance.items())[:5]])}
+        
+        Hãy phân tích chi tiết các yếu tố trên và đưa ra nhận định về xu hướng thị trường trong thời gian tới.
+        """
+        
+        # Generate report using Gemini
+        response = self.model.generate_content(prompt)
+        return response.text 

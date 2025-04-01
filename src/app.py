@@ -12,6 +12,7 @@ from src.analyzers.report_generator import ReportGenerator
 from src.analyzers.portfolio_analyzer import PortfolioAnalyzer
 from src.charts.chart_creator import ChartCreator
 from src.utils.api_client import FireantAPI
+from src.predictors.ai_price_predictor import AIPricePredictor
 
 # Load environment variables
 load_dotenv()
@@ -30,7 +31,7 @@ def main():
         st.title("Menu")
         menu_option = st.radio(
             "Chọn chức năng",
-            ["Phân Tích Cổ Phiếu", "Phân Bổ Danh Mục"]
+            ["Phân Tích Cổ Phiếu", "Phân Bổ Danh Mục", "Phân Tích Thị Trường"]
         )
     
     if menu_option == "Phân Tích Cổ Phiếu":
@@ -520,6 +521,209 @@ def main():
             except Exception as e:
                 st.error(f"Lỗi khi phân tích danh mục: {str(e)}")
                 st.error("Vui lòng kiểm tra lại danh sách mã chứng khoán và thử lại.")
+    elif menu_option == "Phân Tích Thị Trường":
+        st.title("Phân Tích Thị Trường")
+        st.write("Phân tích xu hướng và chỉ báo kỹ thuật của thị trường chung")
+        
+        # Initialize components
+        api_client = FireantAPI()
+        chart_creator = ChartCreator()
+        report_generator = ReportGenerator()
+        
+        try:
+            with st.spinner("Đang phân tích dữ liệu thị trường..."):
+                # Get VNINDEX data for the last year
+                end_date = pd.Timestamp.now()
+                start_date = end_date - pd.DateOffset(years=1)
+                
+                # Fetch VNINDEX data
+                vnindex_data = api_client.get_historical_quotes(
+                    "VNINDEX",
+                    start_date.strftime('%m/%d/%Y'),
+                    end_date.strftime('%m/%d/%Y')
+                )
+                
+                # Convert to DataFrame
+                df = pd.DataFrame(vnindex_data)
+                df['Date'] = pd.to_datetime(df['date'])
+                df = df.sort_values('Date')
+                
+                # Calculate technical indicators
+                price_analyzer = PriceTrendAnalyzer("VNINDEX")
+                df_with_indicators = price_analyzer.calculate_technical_indicators()
+                
+                # Get AI prediction
+                ai_predictor = AIPricePredictor("VNINDEX")
+                ai_metrics = ai_predictor.train()
+                ai_prediction = ai_predictor.predict()
+                ai_importance = ai_predictor.get_feature_importance()
+                
+                # Display results in tabs
+                tab1, tab2, tab3 = st.tabs(["Phân Tích Kỹ Thuật", "Dự Đoán AI", "Báo Cáo Chi Tiết"])
+                
+                with tab1:
+                    # Display market overview
+                    st.subheader("Tổng Quan Thị Trường")
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    latest = df_with_indicators.iloc[-1]
+                    prev = df_with_indicators.iloc[-2]
+                    
+                    with col1:
+                        st.metric(
+                            "VNINDEX",
+                            f"{latest['priceClose']:,.2f}",
+                            f"{((latest['priceClose'] - prev['priceClose']) / prev['priceClose'] * 100):.2f}%"
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            "RSI",
+                            f"{latest['RSI']:.2f}",
+                            "Quá mua" if latest['RSI'] > 70 else "Quá bán" if latest['RSI'] < 30 else "Trung tính"
+                        )
+                    
+                    with col3:
+                        st.metric(
+                            "MACD",
+                            f"{latest['MACD']:.2f}",
+                            "Mua" if latest['MACD'] > latest['Signal_Line'] else "Bán"
+                        )
+                    
+                    with col4:
+                        st.metric(
+                            "Xu Hướng",
+                            "Tăng" if latest['priceClose'] > latest['MA20'] else "Giảm",
+                            "Ngắn hạn"
+                        )
+                    
+                    # Display price trend chart
+                    st.subheader("Biểu Đồ Xu Hướng Giá")
+                    st.plotly_chart(
+                        chart_creator.create_price_trend_chart(df_with_indicators),
+                        use_container_width=True
+                    )
+                    
+                    # Display technical indicators
+                    st.subheader("Chỉ Báo Kỹ Thuật")
+                    st.plotly_chart(
+                        chart_creator.create_technical_indicators_chart(df_with_indicators),
+                        use_container_width=True
+                    )
+                    
+                    # Market analysis
+                    st.subheader("Phân Tích Thị Trường")
+                    
+                    # Calculate market trend
+                    ma20 = df_with_indicators['MA20'].iloc[-1]
+                    ma50 = df_with_indicators['MA50'].iloc[-1]
+                    ma200 = df_with_indicators['MA200'].iloc[-1]
+                    current_price = df_with_indicators['priceClose'].iloc[-1]
+                    
+                    # Determine market trend
+                    if current_price > ma20 > ma50 > ma200:
+                        trend = "Xu hướng tăng mạnh"
+                    elif current_price > ma20 > ma50:
+                        trend = "Xu hướng tăng"
+                    elif current_price < ma20 < ma50 < ma200:
+                        trend = "Xu hướng giảm mạnh"
+                    elif current_price < ma20 < ma50:
+                        trend = "Xu hướng giảm"
+                    else:
+                        trend = "Xu hướng đi ngang"
+                    
+                    # Display market analysis
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("##### Xu Hướng Thị Trường")
+                        st.write(f"- **Xu hướng hiện tại:** {trend}")
+                        st.write(f"- **RSI:** {latest['RSI']:.2f} ({'Quá mua' if latest['RSI'] > 70 else 'Quá bán' if latest['RSI'] < 30 else 'Trung tính'})")
+                        st.write(f"- **MACD:** {'Tín hiệu mua' if latest['MACD'] > latest['Signal_Line'] else 'Tín hiệu bán'}")
+                    
+                    with col2:
+                        st.markdown("##### Chỉ Báo Kỹ Thuật")
+                        st.write(f"- **MA20:** {ma20:,.2f}")
+                        st.write(f"- **MA50:** {ma50:,.2f}")
+                        st.write(f"- **MA200:** {ma200:,.2f}")
+                        st.write(f"- **Bollinger Bands:** {'Quá mua' if current_price > latest['BB_upper'] else 'Quá bán' if current_price < latest['BB_lower'] else 'Trung tính'}")
+                    
+                    # Volume analysis
+                    st.subheader("Phân Tích Khối Lượng")
+                    volume_ma20 = df_with_indicators['dealVolume'].rolling(window=20).mean().iloc[-1]
+                    current_volume = df_with_indicators['dealVolume'].iloc[-1]
+                    
+                    st.write(f"- **Khối lượng hiện tại:** {current_volume:,.0f}")
+                    st.write(f"- **Khối lượng trung bình 20 phiên:** {volume_ma20:,.0f}")
+                    st.write(f"- **So sánh:** {'Cao hơn' if current_volume > volume_ma20 else 'Thấp hơn'} trung bình")
+                
+                with tab2:
+                    # Display AI Prediction
+                    st.subheader("Dự Đoán AI")
+                    
+                    # Create columns for AI metrics
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric(
+                            "Xu Hướng Dự Đoán",
+                            ai_prediction['trend'],
+                            f"{ai_prediction['predicted_return']:.2%}"
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            "Độ Tin Cậy",
+                            f"{ai_prediction['confidence']:.2%}",
+                            "Cao" if ai_prediction['confidence'] > 0.02 else "Trung Bình" if ai_prediction['confidence'] > 0.01 else "Thấp"
+                        )
+                    
+                    with col3:
+                        st.metric(
+                            "Sức Mạnh Tín Hiệu",
+                            ai_prediction['strength'],
+                            f"R²: {ai_metrics['test_score']:.2f}"
+                        )
+                    
+                    with col4:
+                        st.metric(
+                            "Độ Chính Xác",
+                            f"{ai_metrics['test_score']:.2%}",
+                            f"{ai_metrics['test_score'] - 0.5:.2%}"
+                        )
+                    
+                    # Display top features
+                    st.subheader("Các Chỉ Số Quan Trọng Nhất")
+                    feature_cols = st.columns(5)
+                    for i, (feature, importance) in enumerate(list(ai_importance.items())[:5]):
+                        with feature_cols[i]:
+                            st.metric(
+                                feature,
+                                f"{importance:.2f}",
+                                "Quan trọng" if importance > 0.1 else "Trung bình" if importance > 0.05 else "Thấp"
+                            )
+                
+                with tab3:
+                    # Add a button to generate reports
+                    if st.button("Tạo Báo Cáo Chi Tiết"):
+                        with st.spinner("Đang tạo báo cáo chi tiết..."):
+                            # Generate market analysis report
+                            market_report = report_generator.generate_market_report(
+                                df_with_indicators,
+                                ai_prediction,
+                                ai_metrics,
+                                ai_importance
+                            )
+                            
+                            # Display detailed report
+                            st.subheader("Báo Cáo Phân Tích Thị Trường")
+                            st.write(market_report)
+                    else:
+                        st.info("Nhấn nút 'Tạo Báo Cáo Chi Tiết' để xem phân tích chi tiết được tạo bởi AI.")
+                
+        except Exception as e:
+            st.error(f"Lỗi khi phân tích thị trường: {str(e)}")
+            st.error("Vui lòng thử lại sau.")
     elif menu_option == "So Sánh Cổ Phiếu":
         st.title("So Sánh Cổ Phiếu")
         st.write("So sánh các chỉ số tài chính giữa các cổ phiếu")
